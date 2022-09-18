@@ -4,7 +4,7 @@
 #
 # This program is free software: you can redistribute it and/or modify
 
-set -eo pipefail
+set -o pipefail
 
 REGION="us-east-1"
 ASG_NAME=${ASG_NAME:="$1-eks-nodes"}
@@ -50,7 +50,7 @@ enable_k8s_cluster_auto_scaler() {
     else
         echo "disabling kubernetes auto scaling on asg group $RESOURCEID"
         aws autoscaling delete-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/enabled",Value="1",PropagateAtLaunch=true
-        aws autoscaling create-or-update-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/disabled",Value="1",PropagateAtLaunch=false
+        aws autoscaling create-or-update-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/disabled",Value="1",PropagateAtLaunch=true
     fi
 }
 
@@ -103,7 +103,7 @@ check_increased_asg_count() {
 
 # Move the workload to the new loads 
 drain_k8s_node() {
-    for instance in $OLD_INSTANCES; do
+    for instance in $(cat debug-instances.txt); do
         kubectl drain $instance --ignore-daemonsets --force --delete-emptydir-data
         instance_id=$(aws ec2 describe-instances --filters "Name=private-dns-name,Values=$instance" | jq -r .Reservations[0].Instances[0].InstanceId)
         terminate_worker_node $instance_id
