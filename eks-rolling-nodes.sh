@@ -45,7 +45,7 @@ enable_k8s_cluster_auto_scaler() {
 
     if [ "$1" = "true" ]; then
         echo "enabling kubernetes auto scaling on asg group $RESOURCEID"
-        aws autoscaling delete-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/disabled",Value="1",PropagateAtLaunch=false
+        aws autoscaling delete-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/disabled",Value="1",PropagateAtLaunch=true
         aws autoscaling create-or-update-tags --region "$REGION" --tags ResourceId=$RESOURCEID,ResourceType=$RESOURCETYPE,Key="k8s.io/cluster-autoscaler/enabled",Value="1",PropagateAtLaunch=true
     else
         echo "disabling kubernetes auto scaling on asg group $RESOURCEID"
@@ -66,12 +66,21 @@ scale_asg() {
 
     echo "Current Disered capacity $DESIRED_CAPACITY"
 
-    aws autoscaling update-auto-scaling-group \
-        --region "$REGION" \
-        --auto-scaling-group-name "$ASG_NAME" \
-        --desired-capacity $((DESIRED_CAPACITY + $1)) \
-        --max-size $((DESIRED_CAPACITY + $1)) \
-        --min-size $MIN_SIZE
+    if ((DESIRED_CAPACITY + $1 <= MAX_SIZE)); then
+        aws autoscaling update-auto-scaling-group \
+            --region "$REGION" \
+            --auto-scaling-group-name $ASG_NAME \
+            --desired-capacity $((DESIRED_CAPACITY + $1)) \
+            --max-size $MAX_SIZE \
+            --min-size $MIN_SIZE
+    else
+        aws autoscaling update-auto-scaling-group \
+            --region "$REGION" \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --desired-capacity $((DESIRED_CAPACITY + $1)) \
+            --max-size $((DESIRED_CAPACITY + $1)) \
+            --min-size $MIN_SIZE
+    fi
 
     read -r NEW_DESIRED_CAPACITY MAX_SIZE MIN_SIZE <<<$(
         aws autoscaling describe-auto-scaling-groups \
@@ -101,7 +110,7 @@ check_increased_asg_count() {
     sleep 10
 }
 
-# Move the workload to the new loads 
+# Move the workload to the new loads
 drain_k8s_node() {
     for instance in $(cat debug-instances.txt); do
         kubectl drain $instance --ignore-daemonsets --force --delete-emptydir-data
@@ -139,7 +148,7 @@ restore_asg_max_size() {
         --max-size $OLD_DESIRED_CAPACITY \
         --min-size $MIN_SIZE \
         --output text
-
+    echo "$ASG_NAME has been restored to original settings"
 }
 
 enable_k8s_cluster_auto_scaler "false"
