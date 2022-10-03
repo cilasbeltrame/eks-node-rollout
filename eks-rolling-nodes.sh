@@ -21,7 +21,7 @@ kubectl config use-context $CLUSTER_NAME
 wait
 
 OLD_INSTANCES=$(kubectl get nodes --no-headers | awk '{print $1}')
-NUMBER_CURRENT_WORKER_NODES=$(kubectl get nodes --no-headers | grep Ready | wc -l)
+NUMBER_CURRENT_WORKER_NODES=$(kubectl get nodes --no-headers | grep -w Ready | wc -l)
 OVERRIDE_SCALE=$NUMBER_CURRENT_WORKER_NODES
 echo $OLD_INSTANCES >debug-instances.txt
 
@@ -99,24 +99,25 @@ scale_asg() {
 check_increased_asg_count() {
     i=0
     while ((i < 300)); do
-        echo "current number of nodes: $(kubectl get nodes --no-headers | grep Ready | wc -l)"
-        if [[ $(kubectl get nodes --no-headers | grep Ready | wc -l) == $NEW_DESIRED_CAPACITY ]]; then
+        echo "current number of nodes: $(kubectl get nodes --no-headers | grep -w Ready | wc -l)"
+        if [[ $(kubectl get nodes --no-headers | grep -w Ready | wc -l) == $NEW_DESIRED_CAPACITY ]]; then
             echo "Cluster increased successfully"
             echo
             break
             ((i++))
         fi
     done
-    sleep 10
+    sleep 30
 }
 
 # Move the workload to the new loads
 drain_k8s_node() {
     for instance in $(cat debug-instances.txt); do
-        kubectl drain $instance --ignore-daemonsets --force --delete-emptydir-data
         instance_id=$(aws ec2 describe-instances --filters "Name=private-dns-name,Values=$instance" | jq -r .Reservations[0].Instances[0].InstanceId)
+        kubectl drain $instance --grace-period=120 --ignore-daemonsets --force --delete-emptydir-data
         terminate_worker_node $instance_id
         echo "$instance_id killed"
+        
     done
 
     sleep 10
@@ -148,11 +149,11 @@ restore_asg_max_size() {
         --max-size $OLD_DESIRED_CAPACITY \
         --min-size $MIN_SIZE \
         --output text
-    echo "$ASG_NAME has been restored to original settings"
+    echo "$ASG_NAME - Desired and maximum capacity is set to $OLD_DESIRED_CAPACITY"
 }
 
 enable_k8s_cluster_auto_scaler "false"
 scale_asg $OVERRIDE_SCALE
-drain_k8s_node $INSTANCE_IDS
+drain_k8s_node
 restore_asg_max_size
 enable_k8s_cluster_auto_scaler "true"
